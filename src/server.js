@@ -59,6 +59,35 @@ app.use('/api/schedules', scheduleRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/reports', reportRoutes);
 
+// TEMPORARY - Remove after seeding
+app.get('/api/seed-admin', async (req, res) => {
+  try {
+    const bcrypt = require('bcryptjs');
+    const { prisma } = require('./config/database');
+    
+    const existing = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
+    if (existing) {
+      return res.json({ message: 'Admin already exists', phone: existing.phone });
+    }
+    
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+    const admin = await prisma.user.create({
+      data: {
+        phone: '9999999999',
+        password: hashedPassword,
+        name: 'Super Admin',
+        role: 'ADMIN',
+        isActive: true,
+      },
+    });
+    
+    res.json({ message: 'Admin created!', phone: admin.phone });
+  } catch (error) {
+    res.json({ error: error.message });
+  }
+});
+
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
