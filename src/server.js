@@ -74,6 +74,16 @@ app.use((error, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
+
+  // Debug: Check if env vars are loaded
+  console.log('🔍 DATABASE_URL exists:', !!process.env.DATABASE_URL);
+  console.log('🔍 DIRECT_URL exists:', !!process.env.DIRECT_URL);
+  console.log('🔍 DATABASE_URL starts with:', 
+    process.env.DATABASE_URL 
+      ? process.env.DATABASE_URL.substring(0, 30) + '...' 
+      : 'UNDEFINED!'
+  );
+
   await connectDatabase();
 
   // Run startup tasks
