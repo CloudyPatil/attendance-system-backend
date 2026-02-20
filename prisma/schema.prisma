@@ -1,0 +1,165 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum Role {
+  ADMIN
+  OWNER
+  TRAINER
+  STUDENT
+}
+
+enum AttendanceStatus {
+  PENDING
+  PRESENT
+  ABSENT
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+}
+
+// ==================== MODELS ====================
+
+model User {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  password  String
+  role      Role
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  ownedSchools School[]  @relation("SchoolOwner")
+  trainer      Trainer?
+  student      Student?
+
+  @@map("users")
+}
+
+model School {
+  id        String   @id @default(uuid())
+  name      String
+  ownerId   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Subscription fields
+  subscriptionStatus SubscriptionStatus @default(ACTIVE)
+  subscriptionStart  DateTime           @default(now())
+  subscriptionEnd    DateTime?
+  subscriptionNote   String?
+
+  // Relations
+  owner    User      @relation("SchoolOwner", fields: [ownerId], references: [id])
+  trainers Trainer[]
+  students Student[]
+  courses  Course[]
+
+  @@map("schools")
+}
+
+model Trainer {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  schoolId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id])
+  school      School       @relation(fields: [schoolId], references: [id])
+  enrollments Enrollment[]
+
+  @@map("trainers")
+}
+
+model Student {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  schoolId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id])
+  school      School       @relation(fields: [schoolId], references: [id])
+  enrollments Enrollment[]
+
+  @@map("students")
+}
+
+model Course {
+  id           String   @id @default(uuid())
+  schoolId     String
+  name         String
+  totalClasses Int
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school      School       @relation(fields: [schoolId], references: [id])
+  enrollments Enrollment[]
+
+  @@map("courses")
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  studentId String
+  courseId   String
+  trainerId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student   Student    @relation(fields: [studentId], references: [id])
+  course    Course     @relation(fields: [courseId], references: [id])
+  trainer   Trainer    @relation(fields: [trainerId], references: [id])
+  schedules Schedule[]
+
+  @@unique([studentId, courseId])
+  @@map("enrollments")
+}
+
+model Schedule {
+  id           String   @id @default(uuid())
+  enrollmentId String
+  date         DateTime @db.Date
+  startTime    String
+  endTime      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  enrollment Enrollment  @relation(fields: [enrollmentId], references: [id])
+  attendance Attendance?
+
+  @@map("schedules")
+}
+
+model Attendance {
+  id              String           @id @default(uuid())
+  scheduleId      String           @unique
+  attendanceToken String           @unique
+  status          AttendanceStatus @default(PENDING)
+  expiresAt       DateTime
+  markedAt        DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id])
+
+  @@map("attendances")
+}
