@@ -4,10 +4,9 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const { connectDatabase } = require('./config/database');
+const { connectDatabase, startConnectionKeepAlive } = require('./config/database');
 const { runAutoAbsent } = require('./utils/autoAbsent');
 const { checkExpiredSubscriptions } = require('./utils/subscriptionChecker');
-const { dbErrorHandler } = require('./middleware/dbErrorHandler'); // ADD THIS
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -43,15 +42,14 @@ app.get('/', (req, res) => {
     success: true,
     message: 'Attendance Management API is running',
     version: '1.0.0',
-    environment: process.env.NODE_ENV || 'development',
     uptime: `${Math.floor(process.uptime())}s`,
   });
 });
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString() 
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -72,9 +70,6 @@ app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// Database error handler (BEFORE global error handler)
-app.use(dbErrorHandler);
-
 // Global error handler
 app.use((error, req, res, next) => {
   console.error('Unhandled error:', error);
@@ -87,11 +82,13 @@ const PORT = process.env.PORT || 5000;
 async function startServer() {
   console.log('🔍 DATABASE_URL exists:', !!process.env.DATABASE_URL);
   console.log('🔍 DIRECT_URL exists:', !!process.env.DIRECT_URL);
-  console.log('🔍 Using port:', 
-    process.env.DATABASE_URL?.includes('6543') ? '6543 (pooler)' : '5432 (direct)'
-  );
 
   await connectDatabase();
+
+  // START DB KEEP-ALIVE (prevents idle disconnect)
+  startConnectionKeepAlive();
+  console.log('🏓 DB keep-alive: Active (every 4 min)');
+
   await runAutoAbsent();
   await checkExpiredSubscriptions();
 
@@ -107,7 +104,8 @@ async function startServer() {
     ╠═══════════════════════════════════════════╣
     ║  🚀 Server: http://0.0.0.0:${PORT}           ║
     ║  📝 Environment: ${(process.env.NODE_ENV || 'development').padEnd(22)}║
-    ║  ✅ Database: Connected (Direct)          ║
+    ║  ✅ Database: Connected                   ║
+    ║  🏓 DB Keep-alive: Every 4 min            ║
     ║  🔄 Auto-absent: Active (hourly)          ║
     ║  ⏰ Subscription check: Active (hourly)   ║
     ╚═══════════════════════════════════════════╝
