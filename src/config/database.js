@@ -12,7 +12,7 @@ function createPrismaClient() {
   });
 }
 
-// Initialize prisma
+// Initialize
 prisma = createPrismaClient();
 
 // Connect with retry
@@ -23,7 +23,7 @@ async function connectDatabase(retries = 5, delay = 5000) {
       console.log('✅ Database connected successfully');
       return;
     } catch (error) {
-      console.error(`❌ Attempt ${i}/${retries} failed:`, error.message);
+      console.error(`❌ Attempt ${i}/${retries}:`, error.message);
 
       if (i === retries) {
         console.error('❌ All connection attempts failed');
@@ -33,64 +33,45 @@ async function connectDatabase(retries = 5, delay = 5000) {
       console.log(`⏳ Retrying in ${delay / 1000}s...`);
       await new Promise(resolve => setTimeout(resolve, delay));
 
-      // Recreate client on failure
+      // Fresh client on retry
       try { await prisma.$disconnect(); } catch (e) {}
       prisma = createPrismaClient();
-    }
-  }
-}
-
-// Wrapper to auto-reconnect on query failures
-async function withRetry(operation, maxRetries = 2) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await operation(prisma);
-    } catch (error) {
-      const isConnectionError =
-        error.code === 'P1001' ||
-        error.code === 'P1002' ||
-        error.code === 'P1008' ||
-        error.code === 'P1017' ||
-        error.message?.includes('prepared statement') ||
-        error.message?.includes("Can't reach database");
-
-      if (isConnectionError && attempt < maxRetries) {
-        console.log(`🔄 Reconnecting... (attempt ${attempt}/${maxRetries})`);
-        try { await prisma.$disconnect(); } catch (e) {}
-        prisma = createPrismaClient();
-        await prisma.$connect();
-        console.log('✅ Reconnected');
-        continue;
-      }
-
-      throw error;
     }
   }
 }
 
 // Keep connection alive - ping every 4 minutes
+// Uses a simple lightweight query
 function startConnectionKeepAlive() {
   setInterval(async () => {
     try {
       await prisma.$queryRaw`SELECT 1`;
     } catch (error) {
-      console.log('🔄 Keep-alive failed, reconnecting...');
+      console.log('🔄 Keep-alive: connection lost, reconnecting...');
+
+      // Destroy old client completely
       try { await prisma.$disconnect(); } catch (e) {}
+
+      // Create fresh client
       prisma = createPrismaClient();
+
       try {
         await prisma.$connect();
-        console.log('✅ Reconnected via keep-alive');
-      } catch (e) {
-        console.error('❌ Keep-alive reconnect failed:', e.message);
+        console.log('✅ Keep-alive: reconnected successfully');
+      } catch (reconnectError) {
+        console.error('❌ Keep-alive: reconnect failed, will retry next cycle');
+        // Don't crash - next keep-alive cycle will try again
       }
     }
   }, 4 * 60 * 1000); // Every 4 minutes
 }
 
 // Graceful shutdown
-const shutdown = async () => {
-  if (prisma) await prisma.$disconnect();
-};
+async function shutdown() {
+  try {
+    if (prisma) await prisma.$disconnect();
+  } catch (e) {}
+}
 
 process.on('beforeExit', shutdown);
 process.on('SIGINT', async () => { await shutdown(); process.exit(0); });
@@ -99,6 +80,5 @@ process.on('SIGTERM', async () => { await shutdown(); process.exit(0); });
 module.exports = {
   get prisma() { return prisma; },
   connectDatabase,
-  withRetry,
   startConnectionKeepAlive,
 };

@@ -85,9 +85,8 @@ async function startServer() {
 
   await connectDatabase();
 
-  // START DB KEEP-ALIVE (prevents idle disconnect)
+  // Keep DB connection alive (prevents idle disconnects)
   startConnectionKeepAlive();
-  console.log('🏓 DB keep-alive: Active (every 4 min)');
 
   await runAutoAbsent();
   await checkExpiredSubscriptions();
@@ -105,7 +104,7 @@ async function startServer() {
     ║  🚀 Server: http://0.0.0.0:${PORT}           ║
     ║  📝 Environment: ${(process.env.NODE_ENV || 'development').padEnd(22)}║
     ║  ✅ Database: Connected                   ║
-    ║  🏓 DB Keep-alive: Every 4 min            ║
+    ║  🏓 Keep-alive: Every 4 min               ║
     ║  🔄 Auto-absent: Active (hourly)          ║
     ║  ⏰ Subscription check: Active (hourly)   ║
     ╚═══════════════════════════════════════════╝
