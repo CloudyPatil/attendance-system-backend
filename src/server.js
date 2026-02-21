@@ -7,6 +7,7 @@ const cors = require('cors');
 const { connectDatabase } = require('./config/database');
 const { runAutoAbsent } = require('./utils/autoAbsent');
 const { checkExpiredSubscriptions } = require('./utils/subscriptionChecker');
+const { dbErrorHandler } = require('./middleware/dbErrorHandler'); // ADD THIS
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -31,7 +32,6 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging (all environments)
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
   next();
@@ -44,6 +44,14 @@ app.get('/', (req, res) => {
     message: 'Attendance Management API is running',
     version: '1.0.0',
     environment: process.env.NODE_ENV || 'development',
+    uptime: `${Math.floor(process.uptime())}s`,
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString() 
   });
 });
 
@@ -59,18 +67,13 @@ app.use('/api/schedules', scheduleRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/reports', reportRoutes);
 
-// Health endpoint for UptimeRobot
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString() 
-  });
-});
-
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
+
+// Database error handler (BEFORE global error handler)
+app.use(dbErrorHandler);
 
 // Global error handler
 app.use((error, req, res, next) => {
@@ -82,23 +85,16 @@ app.use((error, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
-
-  // Debug: Check if env vars are loaded
   console.log('🔍 DATABASE_URL exists:', !!process.env.DATABASE_URL);
   console.log('🔍 DIRECT_URL exists:', !!process.env.DIRECT_URL);
-  console.log('🔍 DATABASE_URL starts with:', 
-    process.env.DATABASE_URL 
-      ? process.env.DATABASE_URL.substring(0, 30) + '...' 
-      : 'UNDEFINED!'
+  console.log('🔍 Using port:', 
+    process.env.DATABASE_URL?.includes('6543') ? '6543 (pooler)' : '5432 (direct)'
   );
 
   await connectDatabase();
-
-  // Run startup tasks
   await runAutoAbsent();
   await checkExpiredSubscriptions();
 
-  // Run auto tasks every hour
   setInterval(() => {
     runAutoAbsent();
     checkExpiredSubscriptions();
@@ -111,7 +107,7 @@ async function startServer() {
     ╠═══════════════════════════════════════════╣
     ║  🚀 Server: http://0.0.0.0:${PORT}           ║
     ║  📝 Environment: ${(process.env.NODE_ENV || 'development').padEnd(22)}║
-    ║  ✅ Database: Connected                   ║
+    ║  ✅ Database: Connected (Direct)          ║
     ║  🔄 Auto-absent: Active (hourly)          ║
     ║  ⏰ Subscription check: Active (hourly)   ║
     ╚═══════════════════════════════════════════╝
