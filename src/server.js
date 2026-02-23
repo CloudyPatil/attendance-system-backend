@@ -4,7 +4,8 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const { connectDatabase, startConnectionKeepAlive } = require('./config/database');
+const { connectDatabase, isConnectionError } = require('./config/database');
+const { ensureDbConnection, markDbUnhealthy } = require('./middleware/dbRetry');
 const { runAutoAbsent } = require('./utils/autoAbsent');
 const { checkExpiredSubscriptions } = require('./utils/subscriptionChecker');
 
@@ -36,7 +37,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
+// Health check (NO database needed)
 app.get('/', (req, res) => {
   res.json({
     success: true,
@@ -47,13 +48,16 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-  });
+  res.status(200).json({ status: 'ok' });
 });
 
-// API routes
+// ========================================
+// DB CONNECTION CHECK - BEFORE ALL /api ROUTES
+// This ONE line protects ALL routes!
+// ========================================
+app.use('/api', ensureDbConnection);
+
+// API routes (NO changes needed in route files!)
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/schools', schoolRoutes);
@@ -70,9 +74,19 @@ app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// Global error handler
+// Global error handler - catches DB errors from ANY middleware/controller
 app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
+  if (isConnectionError(error)) {
+    console.error('🔴 DB error in request:', error.message);
+    markDbUnhealthy(); // Force reconnect on next request
+    return res.status(503).json({
+      success: false,
+      message: 'Database connection lost. Please retry your request.',
+      retryAfter: 3,
+    });
+  }
+
+  console.error('Unhandled error:', error.message);
   res.status(500).json({ success: false, message: 'Internal server error' });
 });
 
@@ -85,15 +99,14 @@ async function startServer() {
 
   await connectDatabase();
 
-  // Keep DB connection alive (prevents idle disconnects)
-  startConnectionKeepAlive();
+  // Run startup tasks (won't crash if DB fails)
+  try { await runAutoAbsent(); } catch (e) { console.log('⚠️ Auto-absent skipped:', e.message); }
+  try { await checkExpiredSubscriptions(); } catch (e) { console.log('⚠️ Subscription check skipped:', e.message); }
 
-  await runAutoAbsent();
-  await checkExpiredSubscriptions();
-
-  setInterval(() => {
-    runAutoAbsent();
-    checkExpiredSubscriptions();
+  // Run auto tasks every hour
+  setInterval(async () => {
+    try { await runAutoAbsent(); } catch (e) { console.log('⚠️ Auto-absent error:', e.message); }
+    try { await checkExpiredSubscriptions(); } catch (e) { console.log('⚠️ Subscription check error:', e.message); }
   }, 60 * 60 * 1000);
 
   app.listen(PORT, '0.0.0.0', () => {
@@ -103,8 +116,7 @@ async function startServer() {
     ╠═══════════════════════════════════════════╣
     ║  🚀 Server: http://0.0.0.0:${PORT}           ║
     ║  📝 Environment: ${(process.env.NODE_ENV || 'development').padEnd(22)}║
-    ║  ✅ Database: Connected                   ║
-    ║  🏓 Keep-alive: Every 4 min               ║
+    ║  ✅ Database: Auto-reconnect enabled      ║
     ║  🔄 Auto-absent: Active (hourly)          ║
     ║  ⏰ Subscription check: Active (hourly)   ║
     ╚═══════════════════════════════════════════╝
