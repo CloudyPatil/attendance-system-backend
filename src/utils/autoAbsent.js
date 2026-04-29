@@ -30,7 +30,7 @@ async function markPastClassesAbsent() {
 
     console.log(`Found ${missedSchedules.length} missed classes, marking as absent...`);
 
-    // Create ABSENT records one by one to avoid enum issues
+    // Create ABSENT records one by one
     let count = 0;
     for (const schedule of missedSchedules) {
       try {
@@ -39,7 +39,6 @@ async function markPastClassesAbsent() {
             scheduleId: schedule.id,
             attendanceToken: 'auto-absent-' + schedule.id,
             expiresAt: new Date(),
-            // Use the same pattern your startClass uses
             status: 'ABSENT',
           },
         });
@@ -47,14 +46,26 @@ async function markPastClassesAbsent() {
       } catch (err) {
         // Skip if already exists (duplicate scheduleId)
         if (err.code === 'P2002') continue;
+        // Skip if database temporarily unavailable
+        if (err.code === 'P1001' || err.code === 'P1002') {
+          console.log('⚠️ Auto-absent skipped: database temporarily unavailable');
+          break;
+        }
         console.log(`Skip schedule ${schedule.id}: ${err.message}`);
       }
     }
 
-    console.log(`✅ Marked ${count} missed classes as ABSENT`);
+    if (count > 0) {
+      console.log(`✅ Marked ${count} missed classes as ABSENT`);
+    }
     return count;
   } catch (error) {
-    console.error('❌ Auto-absent error:', error.message);
+    // Handle database connection errors gracefully
+    if (error.code === 'P1001' || error.code === 'P1002') {
+      console.log('⚠️ Auto-absent skipped: database temporarily unavailable');
+    } else {
+      console.error('❌ Auto-absent error:', error.message);
+    }
     return 0;
   }
 }
@@ -84,7 +95,7 @@ async function markExpiredPendingAbsent() {
 
     if (pendingRecords.length === 0) return 0;
 
-    // Update one by one to avoid enum issues
+    // Update one by one
     let count = 0;
     for (const record of pendingRecords) {
       try {
@@ -94,6 +105,11 @@ async function markExpiredPendingAbsent() {
         });
         count++;
       } catch (err) {
+        // Skip if database temporarily unavailable
+        if (err.code === 'P1001' || err.code === 'P1002') {
+          console.log('⚠️ Mark expired skipped: database temporarily unavailable');
+          break;
+        }
         console.log(`Skip attendance ${record.id}: ${err.message}`);
       }
     }
@@ -103,7 +119,12 @@ async function markExpiredPendingAbsent() {
     }
     return count;
   } catch (error) {
-    console.error('❌ Mark expired error:', error.message);
+    // Handle database connection errors gracefully
+    if (error.code === 'P1001' || error.code === 'P1002') {
+      console.log('⚠️ Mark expired skipped: database temporarily unavailable');
+    } else {
+      console.error('❌ Mark expired error:', error.message);
+    }
     return 0;
   }
 }
@@ -113,8 +134,17 @@ async function markExpiredPendingAbsent() {
  */
 async function runAutoAbsent() {
   console.log('🔄 Running auto-absent check...');
-  await markPastClassesAbsent();
-  await markExpiredPendingAbsent();
+  try {
+    await markPastClassesAbsent();
+    await markExpiredPendingAbsent();
+  } catch (error) {
+    // Final safety net - never crash the server
+    if (error.code === 'P1001' || error.code === 'P1002') {
+      console.log('⚠️ Auto-absent check skipped: database temporarily unavailable');
+    } else {
+      console.error('❌ Auto-absent check failed:', error.message);
+    }
+  }
 }
 
 module.exports = { runAutoAbsent };
